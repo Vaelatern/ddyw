@@ -2,16 +2,23 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"log"
 	"os"
+	"time"
 
+	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/worker"
+	"go.temporal.io/sdk/workflow"
 
 	"github.com/Vaelatern/ddyw/internal/temporal"
 )
 
-type AgentConfiguration struct{}
+type AgentConfiguration struct {
+	LocalConfig interface{}
+}
 
 type Config struct {
 	ExecOnDisk string
@@ -36,7 +43,39 @@ func parseFlags() Config {
 	return rV
 }
 
-func (a *AgentConfiguration) DynAct(ctx context.Context) error {
+func (a *AgentConfiguration) DynAct(ctx context.Context, args converter.EncodedValues) error {
+	var some interface{}
+	_ = args.Get(&some)
+
+	wrapped := struct {
+		Local  interface{}
+		Passed interface{}
+	}{
+		Local:  a.LocalConfig,
+		Passed: some,
+	}
+
+	body, err := json.Marshal(wrapped)
+	if err != nil {
+		return err
+	}
+
+	os.Stdout.Write(body)
+	return nil
+}
+
+func Wflow(ctx workflow.Context) error {
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 10 * time.Second})
+	err := workflow.ExecuteActivity(ctx, "random-activity-name", struct {
+		Abc string
+		Omg int
+	}{
+		Abc: "Hello",
+		Omg: 11111,
+	}).Get(ctx, nil)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -64,7 +103,8 @@ func main() {
 	a := AgentConfiguration{}
 
 	w := worker.New(c, taskQueue, worker.Options{})
-	w.RegisterDynamicActivity(a.DynAct)
+	w.RegisterWorkflow(Wflow)
+	w.RegisterDynamicActivity(a.DynAct, activity.DynamicRegisterOptions{})
 
 	// Start listening to the task queue
 	err = w.Run(worker.InterruptCh())
