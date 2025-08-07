@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"log"
 	"os"
@@ -13,11 +12,13 @@ import (
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 
+	"github.com/Vaelatern/ddyw/internal/scripts"
 	"github.com/Vaelatern/ddyw/internal/temporal"
 )
 
 type AgentConfiguration struct {
-	LocalConfig interface{}
+	LocalConfig   interface{}
+	ScriptContext scripts.ResolutionContext
 }
 
 type Config struct {
@@ -43,25 +44,23 @@ func parseFlags() Config {
 	return rV
 }
 
-func (a *AgentConfiguration) DynAct(ctx context.Context, args converter.EncodedValues) error {
+func (a *AgentConfiguration) DynAct(ctx context.Context, args converter.EncodedValues) (interface{}, error) {
 	var some interface{}
 	_ = args.Get(&some)
+	info := activity.GetInfo(ctx)
 
 	wrapped := struct {
 		Local  interface{}
+		Name   string
 		Passed interface{}
 	}{
 		Local:  a.LocalConfig,
+		Name:   info.ActivityType.Name,
 		Passed: some,
 	}
 
-	body, err := json.Marshal(wrapped)
-	if err != nil {
-		return err
-	}
+	return scripts.RunViaJson[interface{}](ctx, a, wrapped, a.ScriptContext, wrapped.Name)
 
-	os.Stdout.Write(body)
-	return nil
 }
 
 func Wflow(ctx workflow.Context) error {
