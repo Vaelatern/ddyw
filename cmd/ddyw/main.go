@@ -25,6 +25,8 @@ import (
 	"github.com/hairyhenderson/go-fsimpl/httpfs"
 )
 
+var DEFAULT_CONFIG_D string = "config.d"
+
 //go:embed exec
 var embeddedExecutables embed.FS
 
@@ -42,15 +44,15 @@ type Config struct {
 	taskseparator string
 
 	hostagent bool
-	file      string
-	dir       string
+	conffile  string
+	confdir   string
 }
 
 func parseFlags() Config {
 	rV := Config{}
 
-	flag.StringVar(&rV.file, "config", "config.toml", "Path to a single config file")
-	flag.StringVar(&rV.dir, "config-dir", "config.d", "Path to a directory of config files")
+	flag.StringVar(&rV.conffile, "config", "config.toml", "Path to a single config file")
+	flag.StringVar(&rV.confdir, "config-dir", DEFAULT_CONFIG_D, "Path to a directory of config files")
 	flag.BoolVar(&rV.hostagent, "host-agent", false, "Enable host mode")
 	flag.StringVar(&rV.role, "role", "", "Take on a specific role")
 	flag.StringVar(&rV.execlocal, "exec-local", "./exec/", "Directory for execution fallback")
@@ -67,7 +69,7 @@ func computeFs(path string) (fs.FS, error) {
 	if path == "" {
 		return nil, nil
 	}
-	if strings.HasPrefix(path, "./") {
+	if strings.HasPrefix(path, "./") || !strings.Contains(path, "://") {
 		cwd, err := os.Getwd()
 		if err == nil {
 			path = "file://" + cwd + "/" + path
@@ -104,6 +106,8 @@ func bakeConfig() Config {
 	if rV.role != "" {
 		rV.Agent.ScriptContext.Role = rV.role
 	}
+
+	// Execution Directories
 	rV.Agent.ScriptContext.EmbeddedDir, err = fs.Sub(embeddedExecutables, "exec")
 	if err != nil {
 		log.Fatalf("Failed to compute Embedded Execution Directory: %v", err)
@@ -115,6 +119,36 @@ func bakeConfig() Config {
 	rV.Agent.ScriptContext.RemoteDir, err = computeFs(rV.execremote)
 	if err != nil {
 		log.Fatalf("Failed to compute Remote Execution Directory: %v", err)
+	}
+
+	//// Configuration Files
+	conffile, err := os.Open(rV.conffile)
+	if err != nil {
+		log.Fatalf("Failed to compute Configuration File: %v", err)
+	}
+	confdir, err := computeFs(rV.confdir)
+	if err != nil {
+		log.Fatalf("Failed to compute Configuration Dir: %v", err)
+	}
+
+	var fileEntries []fs.File
+	entries, err := fs.ReadDir(confdir, ".")
+	if err != nil && rV.confdir != DEFAULT_CONFIG_D { // allow ignoring the default config directory
+		log.Fatalf("Can't read directory %s: %v", confdir, err)
+	}
+	for _, f := range entries {
+		fAsFile, err := confdir.Open(f.Name())
+		if err != nil {
+			log.Fatalf("Can't read conf file within directory: %s: %v", f.Name(), err)
+		}
+		fileEntries = append(fileEntries, fAsFile)
+	}
+	if conffile != nil {
+		fileEntries = append(fileEntries, conffile)
+	}
+	rV.Agent.LocalConfig, err = DeepMergeFiles(fileEntries)
+	if err != nil {
+		log.Fatalf("Merge failed: %v", err)
 	}
 
 	return rV

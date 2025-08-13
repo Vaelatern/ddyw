@@ -3,10 +3,12 @@ module github.com/Vaelatern/ddyw
 go 1.24.1
 
 require (
+	github.com/BurntSushi/toml v0.3.1
 	github.com/hairyhenderson/go-fsimpl v0.3.1
 	github.com/leonklingele/securetemp v2.0.1+incompatible
 	go.temporal.io/sdk v1.35.0
 	golang.org/x/text v0.25.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -121,5 +123,4 @@ require (
 	google.golang.org/grpc v1.72.1 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

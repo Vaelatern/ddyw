@@ -21,7 +21,7 @@ var scriptCache = make(map[string][]byte)
 // RunViaJson executes a script with JSON input/output in a temporary ramdisk
 func RunViaJson[Out any, Args any, In any](ctx context.Context, args Args, input In, scriptFile fs.File) (Out, error) {
 	var result Out
-	finalStat, err := scriptFile.Stat()
+	finalStat, _ := scriptFile.Stat()
 	finalName := finalStat.Name()
 
 	// Build a shack to call $HOME
