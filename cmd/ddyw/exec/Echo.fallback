@@ -1,0 +1,4 @@
+#!/bin/sh
+# Returns the data it was sent as an easy fallback option. Named `.fallback` to place it last in line.
+
+exec cat
