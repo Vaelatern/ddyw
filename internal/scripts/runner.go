@@ -1,6 +1,7 @@
 package scripts
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -11,12 +12,59 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/leonklingele/securetemp"
 )
 
 // Cache for HTTP-fetched scripts (in-memory for simplicity, could be persisted).
 var scriptCache = make(map[string][]byte)
+
+// CheckShebang returns a []string after parsing the shebang line.
+// In the Linux way, this is split into two: split on the first space.
+// If the first line does not begin with #! then the return is []string{"/bin/sh", finalPath}
+// We do this because we use /dev/shm to execute stuff, and that's often mounted noexec.
+// As such we always need an interpreter to run the program.
+func CheckShebang(filePath string) []string {
+	// Default return if no valid shebang is found
+	result := []string{"/bin/sh", filePath}
+
+	// Open the file
+	file, err := os.Open(filePath)
+	if err != nil {
+		return result
+	}
+	defer file.Close()
+
+	// Create a scanner to read the first line
+	scanner := bufio.NewScanner(file)
+	if !scanner.Scan() {
+		return result
+	}
+
+	// Get the first line
+	firstLine := scanner.Text()
+
+	// Check if it starts with #!
+	if !strings.HasPrefix(firstLine, "#!") {
+		return result
+	}
+
+	// Remove #! and the optional space that POSIX says can be in a shebang line
+	command := strings.TrimSpace(strings.TrimPrefix(firstLine, "#!"))
+
+	// Split on first space
+	parts := strings.SplitN(command, " ", 2)
+
+	if len(parts) == 1 {
+		return []string{parts[0], filePath}
+	} else {
+		return []string{parts[0], parts[1] + " " + filePath}
+	}
+
+	// Return the interpreter and any arguments
+	return parts
+}
 
 // RunViaJson executes a script with JSON input/output in a temporary ramdisk
 func RunViaJson[Out any, Args any, In any](ctx context.Context, args Args, input In, scriptFile fs.File) (Out, error) {
@@ -57,7 +105,8 @@ func RunViaJson[Out any, Args any, In any](ctx context.Context, args Args, input
 	}
 
 	// Execute script in ramdisk
-	cmd := exec.CommandContext(ctx, "/bin/sh", finalPath)
+	shebangLine := CheckShebang(finalPath)
+	cmd := exec.CommandContext(ctx, shebangLine[0], shebangLine[1])
 	cmd.Env = append(os.Environ(), "HOME="+tmpDir)
 	cmd.Stdin = bytes.NewReader(data)
 
