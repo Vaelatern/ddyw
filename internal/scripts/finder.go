@@ -27,7 +27,12 @@ type checkargs struct {
 	name string
 }
 
+// Resolve is a longer function than it necessarily needs to be
+// It's all in one so the details of execution can be altered later
+// We need to go through all the possible names, given a name, and
+// find the one that will match what we need.
 func (r ResolutionContext) Resolve(name string) fs.File {
+	// Basic lookups per the readme
 	checkSets := []checkargs{
 		checkargs{
 			fsys: r.LocalDir,
@@ -47,12 +52,52 @@ func (r ResolutionContext) Resolve(name string) fs.File {
 		},
 	}
 
-	for _, set := range checkSets {
+	// Construct a set of name alterations, in the form of functions to translate names
+	nameAdjuster := []func(string) string{
+		func(name string) string { // identity
+			return name
+		},
+	}
+	{
+		isHost := r.Host != ""
+		isRole := r.Role != ""
+		normalizedRole := cases.Title(language.Und).String(r.Role)
+		if isRole {
+			nameAdjuster = append(nameAdjuster, func(name string) string {
+				return normalizedRole + name
+			})
+		}
+		if isHost {
+			nameAdjuster = append(nameAdjuster, func(name string) string {
+				return r.Host + "." + name
+			})
+		}
+		if isHost && isRole {
+			nameAdjuster = append(nameAdjuster, func(name string) string {
+				return r.Host + "." + normalizedRole + name
+			})
+		}
+		slices.Reverse(nameAdjuster)
+	}
+
+	// Expand the lists of possible scripts, building a whole matrix
+	expandedCheckSets := []checkargs{}
+	for _, check := range checkSets {
+		for _, namefn := range nameAdjuster {
+			expandedCheckSets = append(expandedCheckSets,
+				checkargs{
+					fsys: check.fsys,
+					name: namefn(check.name),
+				})
+		}
+	}
+
+	// Check through the lists now that we know
+	for _, set := range expandedCheckSets {
 		if set.fsys == nil {
 			continue
 		}
-		rV := r.CheckName(set.fsys, set.name)
-		if rV != nil {
+		if rV := r.CheckName(set.fsys, set.name); rV != nil {
 			return rV
 		}
 	}
@@ -60,37 +105,18 @@ func (r ResolutionContext) Resolve(name string) fs.File {
 }
 
 func (r ResolutionContext) CheckName(fsys fs.FS, name string) fs.File {
-	isHost := r.Host != ""
-	isRole := r.Role != ""
-	normalizedRole := cases.Title(language.Und).String(r.Role)
-	checkOrder := []string{name}
-	if isRole {
-		checkOrder = append(checkOrder, normalizedRole+name)
+	file, err := fsys.Open(name)
+	if err != nil {
+		return nil
 	}
-	if isHost {
-		checkOrder = append(checkOrder, r.Host+"."+name)
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil
 	}
-	if isHost && isRole {
-		checkOrder = append(checkOrder, r.Host+"."+normalizedRole+name)
+	if info.IsDir() {
+		file.Close()
+		return nil
 	}
-
-	slices.Reverse(checkOrder) // Other order please
-
-	for _, script := range checkOrder {
-		file, err := fsys.Open(script)
-		if err != nil {
-			continue
-		}
-		info, err := file.Stat()
-		if err != nil {
-			file.Close()
-			continue
-		}
-		if info.IsDir() {
-			file.Close()
-			continue
-		}
-		return file
-	}
-	return nil
+	return file
 }
