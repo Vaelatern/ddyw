@@ -11,7 +11,7 @@ import (
 
 // DeepMergeFiles loads TOML and YAML files from fs.File objects into maps and deep merges them.
 func DeepMergeFiles(files []fs.File) (interface{}, error) {
-	var result map[string]interface{}
+	result := make(map[string]interface{})
 
 	for _, file := range files {
 		filestat, _ := file.Stat()
@@ -19,7 +19,7 @@ func DeepMergeFiles(files []fs.File) (interface{}, error) {
 		// Read file content
 		data, err := io.ReadAll(file)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read file %s: %w", filename, err)
+			return result, fmt.Errorf("failed to read file %s: %w", filename, err)
 		}
 
 		// Try parsing as TOML
@@ -37,7 +37,7 @@ func DeepMergeFiles(files []fs.File) (interface{}, error) {
 		}
 
 		// If neither TOML nor YAML parsing succeeded
-		return nil, fmt.Errorf("file %s is neither valid TOML nor YAML", filename)
+		return result, fmt.Errorf("file %s is neither valid TOML nor YAML", filename)
 	}
 
 	return result, nil

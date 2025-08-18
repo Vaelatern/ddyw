@@ -17,9 +17,6 @@ import (
 	"github.com/leonklingele/securetemp"
 )
 
-// Cache for HTTP-fetched scripts (in-memory for simplicity, could be persisted).
-var scriptCache = make(map[string][]byte)
-
 // CheckShebang returns a []string after parsing the shebang line.
 // In the Linux way, this is split into two: split on the first space.
 // If the first line does not begin with #! then the return is []string{"/bin/sh", finalPath}
