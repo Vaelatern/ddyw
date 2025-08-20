@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,13 +17,15 @@ import (
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 
-	"github.com/Vaelatern/ddyw/internal/scripts"
-	"github.com/Vaelatern/ddyw/internal/temporal"
+	"github.com/fsnotify/fsnotify"
 	"github.com/hairyhenderson/go-fsimpl"
 	"github.com/hairyhenderson/go-fsimpl/blobfs"
 	"github.com/hairyhenderson/go-fsimpl/filefs"
 	"github.com/hairyhenderson/go-fsimpl/gitfs"
 	"github.com/hairyhenderson/go-fsimpl/httpfs"
+
+	"github.com/Vaelatern/ddyw/internal/scripts"
+	"github.com/Vaelatern/ddyw/internal/temporal"
 )
 
 var DEFAULT_CONFIG_D string = "config.d"
@@ -42,6 +45,7 @@ type Config struct {
 	role          string
 	taskprefix    string
 	taskseparator string
+	watchdir      string
 
 	hostagent bool
 	conffile  string
@@ -59,6 +63,7 @@ func parseFlags() Config {
 	flag.StringVar(&rV.execremote, "exec-remote", "", "Remote findable execution location")
 	flag.StringVar(&rV.taskprefix, "task-prefix", "!ddyw", "Temporal task queues begin with this prefix")
 	flag.StringVar(&rV.taskseparator, "task-separator", "!", "Temporal task queue sections (preix, role, host) have this between them")
+	flag.StringVar(&rV.watchdir, "watch-dir", "watch", "Watch this directory for json formatted activities to trigger directly")
 
 	// Parse flags
 	flag.Parse()
@@ -183,6 +188,77 @@ func Wflow(ctx workflow.Context) error {
 	return nil
 }
 
+func (c Config) runLocalCommandedScript(name string) func() {
+	return func() {
+		fp, err := os.Open(name)
+		if err != nil {
+			fmt.Printf("Failed opening script %s: %v\n", name, err)
+			return
+		}
+		defer fp.Close()
+		err = scripts.RunLocalViaJson(c.Agent.LocalConfig,
+			c.Agent.ScriptContext,
+			c.watchdir,
+			fp)
+		if err != nil {
+			fmt.Printf("Failed running script %s: %v\n", name, err)
+			return
+		}
+		fp.Close()
+		err = os.Remove(name)
+		if err != nil {
+			fmt.Printf("Failed removing script %s after run: %v\n", name, err)
+			return
+		}
+	}
+}
+
+func (c Config) watchAndProcDir() error {
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		return fmt.Errorf("Failed to create watcher: %v", err)
+	}
+	defer w.Close()
+
+	// No thanks, don't use this feature
+	if c.watchdir == "" {
+		return nil
+	}
+
+	// Get the dir, please.
+	err = w.Add(c.watchdir)
+	if err != nil {
+		return fmt.Errorf("Failed to add dir '%s' to watcher: %v", c.watchdir, err)
+	}
+
+	var timers map[string]*time.Timer = make(map[string]*time.Timer)
+
+	debounce := 200 * time.Millisecond
+	for {
+		select {
+		case event, ok := <-w.Events:
+			if !ok {
+				return nil
+			}
+			if event.Has(fsnotify.Write) && strings.HasSuffix(event.Name, ".json.in") {
+				name := filepath.Base(event.Name)
+				if name == "." || name[0] == os.PathSeparator {
+					continue
+				}
+				name = strings.TrimSuffix(name, ".json.in")
+				// If the timer doesn't exist, or if it already expired, add the timer.
+				if timers[name] == nil || timers[name].Reset(debounce) {
+					timers[name] = time.AfterFunc(debounce, c.runLocalCommandedScript(event.Name))
+				}
+			}
+		case err := <-w.Errors:
+			return err
+		}
+	}
+
+	return nil
+}
+
 func main() {
 	config := bakeConfig()
 
@@ -211,6 +287,12 @@ func main() {
 	w.RegisterDynamicActivity(a.DynAct, activity.DynamicRegisterOptions{})
 
 	// Start listening to the task queue
+	go func() {
+		err := config.watchAndProcDir()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
 	err = w.Run(worker.InterruptCh())
 	if err != nil {
 		log.Fatal(err)

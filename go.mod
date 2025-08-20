@@ -4,6 +4,7 @@ go 1.24.1
 
 require (
 	github.com/BurntSushi/toml v0.3.1
+	github.com/fsnotify/fsnotify v1.8.0
 	github.com/hairyhenderson/go-fsimpl v0.3.1
 	github.com/leonklingele/securetemp v2.0.1+incompatible
 	go.temporal.io/sdk v1.35.0
