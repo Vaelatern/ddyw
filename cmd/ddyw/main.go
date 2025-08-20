@@ -213,6 +213,28 @@ func (c Config) runLocalCommandedScript(name string) func() {
 	}
 }
 
+func (c Config) listDir() <-chan string {
+	rV := make(chan string)
+	go func() {
+		defer close(rV)
+		dir, err := os.Open(c.watchdir)
+		if err != nil {
+			fmt.Printf("Failed to open watching dir to list items: %v\n", err)
+			return
+		}
+		defer dir.Close()
+		allNames, err := dir.Readdirnames(0)
+		if err != nil {
+			fmt.Printf("Failed to list watching dir items: %v\n", err)
+			return
+		}
+		for _, name := range allNames {
+			rV <- filepath.Join(c.watchdir, name)
+		}
+	}()
+	return rV
+}
+
 func (c Config) watchAndProcDir() error {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -233,9 +255,23 @@ func (c Config) watchAndProcDir() error {
 
 	var timers map[string]*time.Timer = make(map[string]*time.Timer)
 
+	initialRead := c.listDir()
 	debounce := 200 * time.Millisecond
 	for {
 		select {
+		case fullName := <-initialRead:
+			if !strings.HasSuffix(fullName, ".json.in") {
+				continue
+			}
+			name := filepath.Base(fullName)
+			if name == "." || name[0] == os.PathSeparator {
+				continue
+			}
+			name = strings.TrimSuffix(name, ".json.in")
+			// If the timer doesn't exist, or if it already expired, add the timer.
+			if timers[name] == nil || timers[name].Reset(debounce) {
+				timers[name] = time.AfterFunc(debounce, c.runLocalCommandedScript(fullName))
+			}
 		case event, ok := <-w.Events:
 			if !ok {
 				return nil
