@@ -128,12 +128,21 @@ func bakeConfig() Config {
 
 	//// Configuration Files
 	conffile, err := os.Open(rV.conffile)
+	var noconffile, noconfdir error
 	if err != nil {
-		log.Fatalf("Failed to compute Configuration File: %v", err)
+		noconffile = fmt.Errorf("Failed to compute Configuration File: %v", err)
 	}
 	confdir, err := computeFs(rV.confdir)
 	if err != nil {
-		log.Fatalf("Failed to compute Configuration Dir: %v", err)
+		noconfdir = fmt.Errorf("Failed to compute Configuration Dir: %v", err)
+	}
+
+	if noconffile != nil && noconfdir != nil {
+		log.Fatalf("Can't compute conf file %s (%v) or dir %s (%v)", rV.conffile, noconffile, rV.confdir, noconfdir)
+	} else if noconffile != nil {
+		log.Printf("Not loading conf file %s: %v", rV.conffile, noconffile)
+	} else if noconfdir != nil {
+		log.Printf("Not loading conf dir %s: %v", rV.confdir, noconfdir)
 	}
 
 	var fileEntries []fs.File
