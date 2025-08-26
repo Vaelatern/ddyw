@@ -15,7 +15,6 @@ import (
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/worker"
-	"go.temporal.io/sdk/workflow"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/hairyhenderson/go-fsimpl"
@@ -24,6 +23,7 @@ import (
 	"github.com/hairyhenderson/go-fsimpl/gitfs"
 	"github.com/hairyhenderson/go-fsimpl/httpfs"
 
+	"github.com/Vaelatern/ddyw/internal/customization"
 	"github.com/Vaelatern/ddyw/internal/scripts"
 	"github.com/Vaelatern/ddyw/internal/temporal"
 )
@@ -182,21 +182,6 @@ func (a *AgentConfiguration) DynAct(ctx context.Context, args converter.EncodedV
 
 }
 
-func Wflow(ctx workflow.Context) error {
-	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 10 * time.Second})
-	err := workflow.ExecuteActivity(ctx, "Echo", struct {
-		Abc string
-		Omg int
-	}{
-		Abc: "Hello",
-		Omg: 11111,
-	}).Get(ctx, nil)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func (c Config) runLocalCommandedScript(name string) func() {
 	return func() {
 		fp, err := os.Open(name)
@@ -328,7 +313,16 @@ func main() {
 	var a AgentConfiguration = config.Agent
 
 	w := worker.New(c, taskQueue, worker.Options{})
-	w.RegisterWorkflow(Wflow)
+
+	for i := range customization.Activities {
+		w.RegisterActivityWithOptions(customization.Activities[i],
+			customization.ActivityOptions[i])
+	}
+	for i := range customization.Workflows {
+		w.RegisterWorkflowWithOptions(customization.Workflows[i],
+			customization.WorkflowOptions[i])
+	}
+
 	w.RegisterDynamicActivity(a.DynAct, activity.DynamicRegisterOptions{})
 
 	// Start listening to the task queue
