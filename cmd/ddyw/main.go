@@ -292,16 +292,16 @@ func (c Config) watchAndProcDir() error {
 func main() {
 	config := bakeConfig()
 
-	taskQueue := config.taskprefix + config.taskseparator // default: !ddyw!
+	taskQueue := config.taskprefix // default: !ddyw
 	if config.role != "" {
-		taskQueue += "role" + config.taskseparator + config.role // role!RoleName
+		taskQueue += config.taskseparator + "role" + config.taskseparator + config.role // !role!RoleName
 	}
 	if config.hostagent {
 		hostname, err := os.Hostname()
 		if err != nil {
 			log.Fatal(err)
 		}
-		taskQueue += "host" + config.taskseparator + hostname // host!example.com
+		taskQueue += config.taskseparator + "host" + config.taskseparator + hostname // !host!example.com
 	}
 
 	c, err := temporal.EasyClient(temporal.Logger())
