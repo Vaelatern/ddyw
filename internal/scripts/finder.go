@@ -3,9 +3,6 @@ package scripts
 import (
 	"io/fs"
 	"slices"
-
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 // From the README
@@ -61,10 +58,9 @@ func (r ResolutionContext) Resolve(name string) fs.File {
 	{
 		isHost := r.Host != ""
 		isRole := r.Role != ""
-		normalizedRole := cases.Title(language.Und).String(r.Role)
 		if isRole {
 			nameAdjuster = append(nameAdjuster, func(name string) string {
-				return normalizedRole + name
+				return r.Role + name
 			})
 		}
 		if isHost {
@@ -74,7 +70,7 @@ func (r ResolutionContext) Resolve(name string) fs.File {
 		}
 		if isHost && isRole {
 			nameAdjuster = append(nameAdjuster, func(name string) string {
-				return r.Host + "." + normalizedRole + name
+				return r.Host + "." + r.Role + name
 			})
 		}
 		slices.Reverse(nameAdjuster)

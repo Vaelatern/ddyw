@@ -15,6 +15,8 @@ import (
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/worker"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/hairyhenderson/go-fsimpl"
@@ -58,7 +60,7 @@ func parseFlags() Config {
 	flag.StringVar(&rV.conffile, "config", "config.toml", "Path to a single config file")
 	flag.StringVar(&rV.confdir, "config-dir", DEFAULT_CONFIG_D, "Path to a directory of config files")
 	flag.BoolVar(&rV.hostagent, "host-agent", false, "Enable host mode")
-	flag.StringVar(&rV.role, "role", "", "Take on a specific role")
+	flag.StringVar(&rV.role, "role", "", "Take on a specific role (will be case normalized)")
 	flag.StringVar(&rV.execlocal, "exec-local", "./exec/", "Directory for execution fallback")
 	flag.StringVar(&rV.execremote, "exec-remote", "", "Remote findable execution location")
 	flag.StringVar(&rV.taskprefix, "task-prefix", "!ddyw", "Temporal task queues begin with this prefix")
@@ -109,7 +111,7 @@ func bakeConfig() Config {
 		}
 	}
 	if rV.role != "" {
-		rV.Agent.ScriptContext.Role = rV.role
+		rV.Agent.ScriptContext.Role = cases.Title(language.Und).String(rV.role)
 	}
 
 	// Execution Directories
