@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"embed"
-	"flag"
 	"fmt"
 	"io/fs"
 	"log"
@@ -24,6 +23,8 @@ import (
 	"github.com/hairyhenderson/go-fsimpl/filefs"
 	"github.com/hairyhenderson/go-fsimpl/gitfs"
 	"github.com/hairyhenderson/go-fsimpl/httpfs"
+	"github.com/spf13/pflag"
+	"github.com/yalue/merged_fs"
 
 	"github.com/Vaelatern/ddyw/internal/customization"
 	"github.com/Vaelatern/ddyw/internal/scripts"
@@ -43,11 +44,11 @@ type AgentConfiguration struct {
 type Config struct {
 	Agent         AgentConfiguration
 	execlocal     string
-	execremote    string
 	role          string
 	taskprefix    string
 	taskseparator string
 	watchdir      string
+	execremote    []string
 
 	hostagent bool
 	conffile  string
@@ -57,18 +58,18 @@ type Config struct {
 func parseFlags() Config {
 	rV := Config{}
 
-	flag.StringVar(&rV.conffile, "config", "config.toml", "Path to a single config file")
-	flag.StringVar(&rV.confdir, "config-dir", DEFAULT_CONFIG_D, "Path to a directory of config files")
-	flag.BoolVar(&rV.hostagent, "host-agent", false, "Enable host mode")
-	flag.StringVar(&rV.role, "role", "", "Take on a specific role (will be case normalized)")
-	flag.StringVar(&rV.execlocal, "exec-local", "./exec/", "Directory for execution fallback")
-	flag.StringVar(&rV.execremote, "exec-remote", "", "Remote findable execution location")
-	flag.StringVar(&rV.taskprefix, "task-prefix", "!ddyw", "Temporal task queues begin with this prefix")
-	flag.StringVar(&rV.taskseparator, "task-separator", "!", "Temporal task queue sections (preix, role, host) have this between them")
-	flag.StringVar(&rV.watchdir, "watch-dir", "watch", "Watch this directory for json formatted activities to trigger directly")
+	pflag.StringVar(&rV.conffile, "config", "config.toml", "Path to a single config file")
+	pflag.StringVar(&rV.confdir, "config-dir", DEFAULT_CONFIG_D, "Path to a directory of config files")
+	pflag.BoolVar(&rV.hostagent, "host-agent", false, "Enable host mode")
+	pflag.StringVar(&rV.role, "role", "", "Take on a specific role (will be case normalized)")
+	pflag.StringVar(&rV.execlocal, "exec-local", "./exec/", "Directory for execution fallback")
+	pflag.StringArrayVar(&rV.execremote, "exec-remote", []string{}, "Remote findable execution location, can be specified multiple times")
+	pflag.StringVar(&rV.taskprefix, "task-prefix", "!ddyw", "Temporal task queues begin with this prefix")
+	pflag.StringVar(&rV.taskseparator, "task-separator", "!", "Temporal task queue sections (preix, role, host) have this between them")
+	pflag.StringVar(&rV.watchdir, "watch-dir", "watch", "Watch this directory for json formatted activities to trigger directly")
 
 	// Parse flags
-	flag.Parse()
+	pflag.Parse()
 	return rV
 }
 
@@ -123,10 +124,15 @@ func bakeConfig() Config {
 	if err != nil {
 		log.Fatalf("Failed to compute Local Execution Directory: %v", err)
 	}
-	rV.Agent.ScriptContext.RemoteDir, err = computeFs(rV.execremote)
-	if err != nil {
-		log.Fatalf("Failed to compute Remote Execution Directory: %v", err)
+	tmpFSList := []fs.FS{}
+	for _, remote := range rV.execremote {
+		tmpFS, err := computeFs(remote)
+		if err != nil {
+			log.Fatalf("Failed to compute Remote Execution Directory: %v", err)
+		}
+		tmpFSList = append(tmpFSList, tmpFS)
 	}
+	rV.Agent.ScriptContext.RemoteDir = merged_fs.MergeMultiple(tmpFSList...)
 
 	//// Configuration Files
 	conffile, err := os.Open(rV.conffile)

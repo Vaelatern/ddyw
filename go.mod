@@ -7,6 +7,8 @@ require (
 	github.com/fsnotify/fsnotify v1.8.0
 	github.com/hairyhenderson/go-fsimpl v0.3.1
 	github.com/leonklingele/securetemp v2.0.1+incompatible
+	github.com/spf13/pflag v1.0.10
+	github.com/yalue/merged_fs v1.3.0
 	go.temporal.io/sdk v1.35.0
 	golang.org/x/text v0.25.0
 	gopkg.in/yaml.v3 v3.0.1
