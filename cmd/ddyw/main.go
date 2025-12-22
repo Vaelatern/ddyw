@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/contrib/envconfig"
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/worker"
 	"golang.org/x/text/cases"
@@ -28,7 +30,6 @@ import (
 
 	"github.com/Vaelatern/ddyw/internal/customization"
 	"github.com/Vaelatern/ddyw/internal/scripts"
-	"github.com/Vaelatern/ddyw/internal/temporal"
 )
 
 var DEFAULT_CONFIG_D string = "config.d"
@@ -312,7 +313,7 @@ func main() {
 		taskQueue += config.taskseparator + "host" + config.taskseparator + hostname // !host!example.com
 	}
 
-	c, err := temporal.EasyClient(temporal.Logger())
+	c, err := client.Dial(envconfig.MustLoadDefaultClientOptions())
 	if err != nil {
 		log.Fatal(err)
 	}
