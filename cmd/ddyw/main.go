@@ -29,6 +29,7 @@ import (
 	"github.com/hairyhenderson/go-fsimpl/httpfs"
 	"github.com/spf13/pflag"
 	"github.com/yalue/merged_fs"
+	"gopkg.in/yaml.v3"
 
 	"github.com/Vaelatern/ddyw/internal/customization"
 	"github.com/Vaelatern/ddyw/internal/scripts"
@@ -61,10 +62,10 @@ type Config struct {
 
 // WorkflowConfig lets us wrap Options with the rest of the arguments we need to start a Workflow
 type WorkflowConfig struct {
-	Retries      int                         `json:"submit-retries" toml:"submit-retries"`
-	WorkflowType string                      `json:"workflow-type" toml:"workflow-type"`
-	Options      client.StartWorkflowOptions `json:"options" toml:"options"`
-	Args         []interface{}               `json:"args" toml:"args"`
+	Retries      int                         `yaml:"submit-retries" json:"submit-retries" toml:"submit-retries"`
+	WorkflowType string                      `yaml:"workflow-type" json:"workflow-type" toml:"workflow-type"`
+	Options      client.StartWorkflowOptions `yaml:"options" json:"options" toml:"options"`
+	Args         []interface{}               `yaml:"args" json:"args" toml:"args"`
 }
 
 func parseFlags() Config {
@@ -329,6 +330,8 @@ func (c Config) watchAndProcWorkflowDir(client client.Client) error {
 				wflowConf, cleanup, err = workflowConfigFromFile(fullName, json.Unmarshal)
 			case strings.HasSuffix(fullName, ".toml.in"):
 				wflowConf, cleanup, err = workflowConfigFromFile(fullName, toml.Unmarshal)
+			case strings.HasSuffix(fullName, ".yaml.in"):
+				wflowConf, cleanup, err = workflowConfigFromFile(fullName, yaml.Unmarshal)
 			default:
 				continue
 			}
@@ -372,6 +375,8 @@ func (c Config) watchAndProcWorkflowDir(client client.Client) error {
 				wflowConf, cleanup, err = workflowConfigFromFile(event.Name, json.Unmarshal)
 			case strings.HasSuffix(event.Name, ".toml.in"):
 				wflowConf, cleanup, err = workflowConfigFromFile(event.Name, toml.Unmarshal)
+			case strings.HasSuffix(event.Name, ".yaml.in"):
+				wflowConf, cleanup, err = workflowConfigFromFile(event.Name, yaml.Unmarshal)
 			default:
 				continue
 			}
