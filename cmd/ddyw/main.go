@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
@@ -19,6 +20,7 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
+	"github.com/BurntSushi/toml"
 	"github.com/fsnotify/fsnotify"
 	"github.com/hairyhenderson/go-fsimpl"
 	"github.com/hairyhenderson/go-fsimpl/blobfs"
@@ -49,11 +51,19 @@ type Config struct {
 	taskprefix    string
 	taskseparator string
 	watchdir      string
+	wflowdir      string
 	execremote    []string
 
 	hostagent bool
 	conffile  string
 	confdir   string
+}
+
+// WorkflowConfig lets us wrap Options with the rest of the arguments we need to start a Workflow
+type WorkflowConfig struct {
+	WorkflowType string                      `json:"workflow-type" toml:"workflow-type"`
+	Options      client.StartWorkflowOptions `json:"options" toml:"options"`
+	Args         []interface{}               `json:"args" toml:"args"`
 }
 
 func parseFlags() Config {
@@ -68,6 +78,7 @@ func parseFlags() Config {
 	pflag.StringVar(&rV.taskprefix, "task-prefix", "!ddyw", "Temporal task queues begin with this prefix")
 	pflag.StringVar(&rV.taskseparator, "task-separator", "!", "Temporal task queue sections (preix, role, host) have this between them")
 	pflag.StringVar(&rV.watchdir, "watch-dir", "watch", "Watch this directory for json formatted activities to trigger directly")
+	pflag.StringVar(&rV.wflowdir, "workflow-dir", "wflow", "Watch this directory for json formatted Workflows to trigger on our Temporal server")
 
 	// Parse flags
 	pflag.Parse()
@@ -191,6 +202,41 @@ func (a *AgentConfiguration) DynAct(ctx context.Context, args converter.EncodedV
 
 }
 
+func workflowConfigFromFile(name string, unmarshal func([]byte, interface{}) error) (WorkflowConfig, func(), error) {
+	var rV WorkflowConfig
+	contents, err := os.ReadFile(name)
+	if err != nil {
+		fmt.Printf("Failed reading workflow script %s: %v\n", name, err)
+		return rV, func() {}, err
+	}
+	err = unmarshal(contents, &rV)
+	if err != nil {
+		fmt.Printf("Error during workflow JSON unmarshal(): %v", err)
+		return rV, func() {}, err
+	}
+
+	cleanup := func() {
+		err = os.Remove(name)
+		if err != nil {
+			fmt.Printf("Failed removing workflow script %s after run: %v\n", name, err)
+			return
+		}
+	}
+	return rV, cleanup, nil
+}
+
+func (c Config) runWorkflow(ctx context.Context, client client.Client, wflowconf WorkflowConfig, reschedule func(), cleanup func()) func() {
+	self := func() {
+		_, err := client.ExecuteWorkflow(ctx, wflowconf.Options, wflowconf.WorkflowType, wflowconf.Args...)
+		if err != nil {
+			reschedule()
+		} else {
+			cleanup()
+		}
+	}
+	return self
+}
+
 func (c Config) runLocalCommandedScript(name string) func() {
 	return func() {
 		fp, err := os.Open(name)
@@ -216,11 +262,11 @@ func (c Config) runLocalCommandedScript(name string) func() {
 	}
 }
 
-func (c Config) listDir() <-chan string {
+func (c Config) listDir(dirname string) <-chan string {
 	rV := make(chan string)
 	go func() {
 		defer close(rV)
-		dir, err := os.Open(c.watchdir)
+		dir, err := os.Open(dirname)
 		if err != nil {
 			fmt.Printf("Failed to open watching dir to list items: %v\n", err)
 			return
@@ -232,13 +278,98 @@ func (c Config) listDir() <-chan string {
 			return
 		}
 		for _, name := range allNames {
-			rV <- filepath.Join(c.watchdir, name)
+			rV <- filepath.Join(dirname, name)
 		}
 	}()
 	return rV
 }
 
-func (c Config) watchAndProcDir() error {
+func (c Config) watchAndProcWorkflowDir(client client.Client) error {
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		return fmt.Errorf("Failed to create watcher: %v", err)
+	}
+	defer w.Close()
+
+	// No thanks, don't use this feature
+	if c.wflowdir == "" {
+		return nil
+	}
+
+	// Get the dir, please.
+	err = w.Add(c.wflowdir)
+	if err != nil {
+		return fmt.Errorf("Failed to add dir '%s' to watcher: %v", c.wflowdir, err)
+	}
+
+	var timers map[string]*time.Timer = make(map[string]*time.Timer)
+
+	initialRead := c.listDir(c.wflowdir)
+	debounce := 200 * time.Millisecond
+	failTryAfter := 20 * time.Second
+	for {
+		var cleanup, reschedule func()
+		var wflowConf WorkflowConfig
+		ctx := context.Background()
+		select {
+		case fullName := <-initialRead:
+			name := filepath.Base(fullName)
+			if name == "." || name[0] == os.PathSeparator {
+				continue
+			}
+			switch {
+			case strings.HasSuffix(fullName, ".json.in"):
+				wflowConf, cleanup, err = workflowConfigFromFile(fullName, json.Unmarshal)
+			case strings.HasSuffix(fullName, ".toml.in"):
+				wflowConf, cleanup, err = workflowConfigFromFile(fullName, toml.Unmarshal)
+			default:
+				continue
+			}
+			name = strings.TrimSuffix(name, ".json.in")
+			reschedule = func() {
+				timers[name] = time.AfterFunc(failTryAfter, c.runWorkflow(ctx, client, wflowConf, reschedule, cleanup))
+			}
+			// If the timer doesn't exist, or if it already expired, add the timer.
+			if timers[name] == nil || timers[name].Reset(debounce) {
+				timers[name] = time.AfterFunc(debounce, c.runWorkflow(ctx, client, wflowConf, reschedule, cleanup))
+			}
+		case event, ok := <-w.Events:
+			if !ok {
+				return nil
+			}
+			if !event.Has(fsnotify.Write) {
+				continue
+			}
+			name := filepath.Base(event.Name)
+			if name == "." || name[0] == os.PathSeparator {
+				continue
+			}
+			switch {
+			case strings.HasSuffix(event.Name, ".json.in"):
+				wflowConf, cleanup, err = workflowConfigFromFile(event.Name, json.Unmarshal)
+			case strings.HasSuffix(event.Name, ".toml.in"):
+				wflowConf, cleanup, err = workflowConfigFromFile(event.Name, toml.Unmarshal)
+			default:
+				continue
+			}
+			name = strings.TrimSuffix(name, ".json.in")
+			reschedule = func() {
+				timers[name] = time.AfterFunc(failTryAfter, c.runWorkflow(ctx, client, wflowConf, reschedule, cleanup))
+			}
+			// If the timer doesn't exist, or if it already expired, add the timer.
+			if timers[name] == nil || timers[name].Reset(debounce) {
+				timers[name] = time.AfterFunc(debounce, c.runWorkflow(ctx, client, wflowConf, reschedule, cleanup))
+			}
+		case err := <-w.Errors:
+			return err
+		}
+
+	}
+
+	return nil
+}
+
+func (c Config) watchAndProcActivityDir() error {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return fmt.Errorf("Failed to create watcher: %v", err)
@@ -258,7 +389,7 @@ func (c Config) watchAndProcDir() error {
 
 	var timers map[string]*time.Timer = make(map[string]*time.Timer)
 
-	initialRead := c.listDir()
+	initialRead := c.listDir(c.watchdir)
 	debounce := 200 * time.Millisecond
 	for {
 		select {
@@ -336,7 +467,13 @@ func main() {
 
 	// Start listening to the task queue
 	go func() {
-		err := config.watchAndProcDir()
+		err := config.watchAndProcWorkflowDir(c)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
+	go func() {
+		err := config.watchAndProcActivityDir()
 		if err != nil {
 			log.Fatal(err)
 		}
