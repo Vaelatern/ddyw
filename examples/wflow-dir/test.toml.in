@@ -1,0 +1,7 @@
+submit-retries = 3
+workflow-type = "never-test-me"
+[options]
+id = "myworkflow2"
+taskqueue = "mytask2"
+workflowexecutiontimeout = "1h"
+workflowtasktimeout = "1s"
