@@ -61,6 +61,7 @@ type Config struct {
 
 // WorkflowConfig lets us wrap Options with the rest of the arguments we need to start a Workflow
 type WorkflowConfig struct {
+	Retries      int                         `json:"submit-retries" toml:"submit-retries"`
 	WorkflowType string                      `json:"workflow-type" toml:"workflow-type"`
 	Options      client.StartWorkflowOptions `json:"options" toml:"options"`
 	Args         []interface{}               `json:"args" toml:"args"`
@@ -225,11 +226,12 @@ func workflowConfigFromFile(name string, unmarshal func([]byte, interface{}) err
 	return rV, cleanup, nil
 }
 
-func (c Config) runWorkflow(ctx context.Context, client client.Client, wflowconf WorkflowConfig, reschedule func(), cleanup func()) func() {
+func (c Config) runWorkflow(ctx context.Context, client client.Client, wflowConf WorkflowConfig, reschedule func(int, error), cleanup func(), count int) func() {
 	self := func() {
-		_, err := client.ExecuteWorkflow(ctx, wflowconf.Options, wflowconf.WorkflowType, wflowconf.Args...)
+		_, err := client.ExecuteWorkflow(ctx, wflowConf.Options, wflowConf.WorkflowType, wflowConf.Args...)
 		if err != nil {
-			reschedule()
+			fmt.Printf("Error executing workflow: %v \t Rescheduling : count = %d\n", err, count)
+			reschedule(count-1, err)
 		} else {
 			cleanup()
 		}
@@ -308,7 +310,9 @@ func (c Config) watchAndProcWorkflowDir(client client.Client) error {
 	debounce := 200 * time.Millisecond
 	failTryAfter := 20 * time.Second
 	for {
-		var cleanup, reschedule func()
+		var cleanup func()
+		var reschedule func(int, error)
+		var abort func(error)
 		var wflowConf WorkflowConfig
 		ctx := context.Background()
 		select {
@@ -328,14 +332,30 @@ func (c Config) watchAndProcWorkflowDir(client client.Client) error {
 			default:
 				continue
 			}
+
+			if wflowConf.Retries == 0 {
+				wflowConf.Retries = 10
+			}
 			name = strings.TrimSuffix(name, ".json.in")
-			reschedule = func() {
-				timers[name] = time.AfterFunc(failTryAfter, c.runWorkflow(ctx, client, wflowConf, reschedule, cleanup))
+			abort = func(err error) {
+				_ = scripts.WriteOutFile(c.wflowdir, name, time.Now(), ".run.error", []byte(err.Error()+"\n"))
+				delete(timers, name)
 			}
-			// If the timer doesn't exist, or if it already expired, add the timer.
-			if timers[name] == nil || timers[name].Reset(debounce) {
-				timers[name] = time.AfterFunc(debounce, c.runWorkflow(ctx, client, wflowConf, reschedule, cleanup))
+			cleanup2 := func() {
+				cleanup()
+				delete(timers, name)
 			}
+			reschedule = func(count int, err error) {
+				if count > 0 {
+					timers[name] = time.AfterFunc(failTryAfter, c.runWorkflow(ctx, client, wflowConf, reschedule, cleanup2, count))
+				} else {
+					abort(err)
+				}
+			}
+			if timers[name] != nil {
+				timers[name].Stop()
+			}
+			timers[name] = time.AfterFunc(debounce, c.runWorkflow(ctx, client, wflowConf, reschedule, cleanup2, wflowConf.Retries))
 		case event, ok := <-w.Events:
 			if !ok {
 				return nil
@@ -355,14 +375,29 @@ func (c Config) watchAndProcWorkflowDir(client client.Client) error {
 			default:
 				continue
 			}
+			if wflowConf.Retries == 0 {
+				wflowConf.Retries = 10
+			}
 			name = strings.TrimSuffix(name, ".json.in")
-			reschedule = func() {
-				timers[name] = time.AfterFunc(failTryAfter, c.runWorkflow(ctx, client, wflowConf, reschedule, cleanup))
+			abort = func(err error) {
+				_ = scripts.WriteOutFile(c.wflowdir, name, time.Now(), ".run.error", []byte(err.Error()+"\n"))
+				delete(timers, name)
 			}
-			// If the timer doesn't exist, or if it already expired, add the timer.
-			if timers[name] == nil || timers[name].Reset(debounce) {
-				timers[name] = time.AfterFunc(debounce, c.runWorkflow(ctx, client, wflowConf, reschedule, cleanup))
+			cleanup2 := func() {
+				cleanup()
+				delete(timers, name)
 			}
+			reschedule = func(count int, err error) {
+				if count > 0 {
+					timers[name] = time.AfterFunc(failTryAfter, c.runWorkflow(ctx, client, wflowConf, reschedule, cleanup2, count))
+				} else {
+					abort(err)
+				}
+			}
+			if timers[name] != nil {
+				timers[name].Stop()
+			}
+			timers[name] = time.AfterFunc(debounce, c.runWorkflow(ctx, client, wflowConf, reschedule, cleanup2, wflowConf.Retries))
 		case err := <-w.Errors:
 			return err
 		}
