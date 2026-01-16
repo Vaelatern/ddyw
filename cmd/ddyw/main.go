@@ -312,7 +312,10 @@ func (c Config) watchAndProcWorkflowDir(client client.Client) error {
 		var wflowConf WorkflowConfig
 		ctx := context.Background()
 		select {
-		case fullName := <-initialRead:
+		case fullName, ok := <-initialRead:
+			if !ok {
+				initialRead = nil
+			}
 			name := filepath.Base(fullName)
 			if name == "." || name[0] == os.PathSeparator {
 				continue
@@ -393,7 +396,10 @@ func (c Config) watchAndProcActivityDir() error {
 	debounce := 200 * time.Millisecond
 	for {
 		select {
-		case fullName := <-initialRead:
+		case fullName, ok := <-initialRead:
+			if !ok {
+				initialRead = nil
+			}
 			if !strings.HasSuffix(fullName, ".json.in") {
 				continue
 			}
