@@ -172,7 +172,7 @@ func TestResolutionContext_Resolve(t *testing.T) {
 			LocalDir:    &mockFS{openErr: errors.New("not found")},
 			EmbeddedDir: fsys,
 			RemoteDir:   &mockFS{openErr: errors.New("not found")},
-			Role:        "admin",
+			Role:        "Admin",
 		}
 		result := ctx.Resolve("Testfile")
 		if result == nil {
@@ -217,7 +217,7 @@ func TestResolutionContext_Resolve(t *testing.T) {
 			EmbeddedDir: fsys,
 			RemoteDir:   &mockFS{openErr: errors.New("not found")},
 			Host:        "server1",
-			Role:        "admin",
+			Role:        "Admin",
 		}
 		result := ctx.Resolve("testfile")
 		if result == nil {
@@ -243,7 +243,7 @@ func TestResolutionContext_Resolve(t *testing.T) {
 			EmbeddedDir: fsys,
 			RemoteDir:   &mockFS{openErr: errors.New("not found")},
 			Host:        "server1",
-			Role:        "admin",
+			Role:        "Admin",
 		}
 		result := ctx.Resolve("testfile")
 		if result == nil {
@@ -275,7 +275,7 @@ func TestResolutionContext_Resolve(t *testing.T) {
 			EmbeddedDir: fsys,
 			RemoteDir:   &mockFS{openErr: errors.New("not found")},
 			Host:        "server1",
-			Role:        "admin",
+			Role:        "Admin",
 		}
 		result := ctx.Resolve("testfile")
 		if result == nil {
