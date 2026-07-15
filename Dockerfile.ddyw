@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1
+
+# Build stage
+FROM golang:1.26-alpine3.24 AS builder
+
+WORKDIR /app
+
+# Install git for go modules if needed (some deps may use)
+RUN apk add --no-cache git
+
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
+
+COPY . .
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /ddyw ./cmd/ddyw
+
+# Final stage - minimal alpine with just the ddyw binary
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates tzdata
+
+COPY --from=builder /ddyw /usr/local/bin/ddyw
+
+USER nobody:nobody
+
+ENTRYPOINT ["/usr/local/bin/ddyw"]
+CMD ["--help"]
